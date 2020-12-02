@@ -44,17 +44,17 @@ const dontSelectCorrectAssetMsg = {
 };
 
 module.exports = {
-  load () {
+  load() {
     // execute when package loaded
   },
 
-  unload () {
+  unload() {
     // execute when package unloaded
   },
 
   // register your ipc messages here
   messages: {
-    'unpack' () {
+    'unpack'() {
       Editor.Metrics.trackEvent({
         category: 'Packages',
         label: 'unpack-textureatlas',
@@ -77,53 +77,63 @@ module.exports = {
         let textureAtlasSubMetas = selectionMeta.getSubMetas();
 
         if (assetInfo.type === 'sprite-atlas'
-            && selectionMeta.type === 'Texture Packer'
-            && textureAtlasSubMetas) {
+          && selectionMeta.type === 'Texture Packer'
+          && textureAtlasSubMetas) {
           // In Creator Editor version 2.2.2,use Editor.Project.path 
           let extractedImageSaveFolder = Path.join(Editor.Project.path, 'temp', Path.basenameNoExt(textureAtlasPath) + '_unpack');
           Fs.mkdirsSync(extractedImageSaveFolder);
 
           let spriteFrameNames = Object.keys(textureAtlasSubMetas);
           Async.forEach(spriteFrameNames, function (spriteFrameName, next) {
-            let spriteFrameObj = textureAtlasSubMetas[spriteFrameName];
-            let isRotated = spriteFrameObj.rotated;
-            let originalSize = cc.size(spriteFrameObj.rawWidth, spriteFrameObj.rawHeight);
-            let rect = cc.rect(spriteFrameObj.trimX, spriteFrameObj.trimY, spriteFrameObj.width,spriteFrameObj.height);
-            let offset = cc.p(spriteFrameObj.offsetX, spriteFrameObj.offsetY);
-            let trimmedLeft = offset.x + (originalSize.width - rect.width) / 2;
-            let trimmedRight = (originalSize.width - rect.width) / 2 - offset.x;
-            let trimmedTop = (originalSize.height - rect.height) / 2 - offset.y;
-            let trimmedBottom = offset.y + (originalSize.height - rect.height) / 2;
+            try {
+              let spriteFrameObj = textureAtlasSubMetas[spriteFrameName];
+              let isRotated = spriteFrameObj.rotated;
+              let originalSize = cc.size(spriteFrameObj.rawWidth, spriteFrameObj.rawHeight);
+              let rect = cc.rect(spriteFrameObj.trimX, spriteFrameObj.trimY, spriteFrameObj.width, spriteFrameObj.height);
+              let offset = cc.v2(spriteFrameObj.offsetX, spriteFrameObj.offsetY);
+              let trimmedLeft = offset.x + (originalSize.width - rect.width) / 2;
+              let trimmedRight = (originalSize.width - rect.width) / 2 - offset.x;
+              let trimmedTop = (originalSize.height - rect.height) / 2 - offset.y;
+              let trimmedBottom = offset.y + (originalSize.height - rect.height) / 2;
 
-            let sharpCallback = (err) => {
-              if (err) {
-                Editor.error('Generating ' + spriteFrameName + ' error occurs, details:' + err);
+              let sharpCallback = (err) => {
+                Editor.log(err)
+                if (err) {
+                  Editor.error('Generating ' + spriteFrameName + ' error occurs, details:' + err);
+                }
+
+                Editor.log(spriteFrameName + ' is generated successfully!');
+                next();
+              };
+
+              let extractedSmallPngSavePath = Path.join(extractedImageSaveFolder, spriteFrameName);
+              let sharp = Sharp(textureAtlasPath)
+              if (sharp && sharp.options) {
+                sharp.options.resizeBackground = [0, 0, 0, 0]
+                sharp.options.rotationBackground = [0, 0, 0, 0]
+                sharp.options.extendBackground = [0, 0, 0, 0]
+                sharp.options.tileBackground = [0, 0, 0, 0]
               }
-
-              Editor.log(spriteFrameName + ' is generated successfully!');
-              next();
-            };
-
-            let extractedSmallPngSavePath = Path.join(extractedImageSaveFolder, spriteFrameName);
-            if (isRotated) {
-              
-              Sharp(textureAtlasPath).extract({left: rect.x, top: rect.y, width: rect.height, height:rect.width})
-                // .background('rgba(0,0,0,0)') 
-                .extend({top: trimmedTop, bottom: trimmedBottom, left: trimmedLeft, right: trimmedRight})
-                .rotate(270)
-                .toFile(extractedSmallPngSavePath, sharpCallback);
-
-            } else {
-              Sharp(textureAtlasPath).extract({left: rect.x, top: rect.y, width: rect.width, height:rect.height})
-                // .background('rgba(0,0,0,0)') -- In Creator Editor version 2.2.2,background is undefined
-                .extend({top: trimmedTop, bottom: trimmedBottom, left: trimmedLeft, right: trimmedRight})
-                .rotate(0)
-                .toFile(extractedSmallPngSavePath, sharpCallback);
+              if (isRotated) {
+                sharp.extract({ left: rect.x, top: rect.y, width: rect.height, height: rect.width })
+                  //.background('rgba(0,0,0,0)')
+                  .extend({ top: trimmedTop, bottom: trimmedBottom, left: trimmedLeft, right: trimmedRight })
+                  .rotate(270)
+                  .toFile(extractedSmallPngSavePath, sharpCallback);
+              } else {
+                sharp.extract({ left: rect.x, top: rect.y, width: rect.width, height: rect.height })
+                  //.background('rgba(0,0,0,0)') //-- In Creator Editor version 2.2.2,background is undefined
+                  .extend({ top: trimmedTop, bottom: trimmedBottom, left: trimmedLeft, right: trimmedRight })
+                  .rotate(0)
+                  .toFile(extractedSmallPngSavePath, sharpCallback);
+              }
+            } catch (e) {
+              Editor.error(e)
             }
           }, () => {
             Editor.log(`There are ${spriteFrameNames.length} textures are generated!`);
             //start importing the generated textures folder
-            Editor.Ipc.sendToMain( 'asset-db:import-assets', [extractedImageSaveFolder], Path.dirname(selectionUrl), true, (err) => {
+            Editor.Ipc.sendToMain('asset-db:import-assets', [extractedImageSaveFolder], Path.dirname(selectionUrl), true, (err) => {
               if (err) Editor.log('Importing assets error occurs: details' + err);
 
               Del(extractedImageSaveFolder, { force: true });
@@ -135,7 +145,7 @@ module.exports = {
           Editor.Dialog.messageBox(dontSelectCorrectAssetMsg);
         }
       } else {
-         Editor.Dialog.messageBox(dontSelectCorrectAssetMsg);
+        Editor.Dialog.messageBox(dontSelectCorrectAssetMsg);
       }
     },
   },
